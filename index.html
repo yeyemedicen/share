@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FSI · MeasureIt</title>
+<meta name="description" content="Interactive view of a simulation run, shared from MeasureIt.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.184.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.184.0/examples/jsm/"
+  }
+}
+</script>
+<style>
+:root {
+  --bg: #0d0d0d;
+  --panel: rgba(22, 22, 22, 0.86);
+  --panel-solid: #161616;
+  --line: #2c2c2c;
+  --text: #e2e2e2;
+  --muted: #8a8a8a;
+  --faint: #5a5a5a;
+  --accent: #6fb1d6;
+  --btn: #232323;
+  --btn-hover: #2f2f2f;
+  --btn-on: #3a4a55;
+  --font: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font-family: var(--font); font-size: 12px; overflow: hidden; }
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; touch-action: none; }
+button, select, input { font-family: var(--font); font-size: 12px; color: var(--text); }
+button { background: var(--btn); border: 1px solid var(--line); border-radius: 4px;
+  padding: 5px 10px; cursor: pointer; }
+button:hover:not(:disabled) { background: var(--btn-hover); }
+button:disabled { color: var(--faint); cursor: default; }
+button.on { background: var(--btn-on); border-color: #4d6575; }
+.panel { position: absolute; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+
+/* top bar: view switcher */
+#views { position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 6px; flex-wrap: wrap; justify-content: center;
+  max-width: calc(100vw - 32px); z-index: 3; }
+
+/* HUD */
+#hud { top: 56px; left: 16px; padding: 6px 10px; max-width: min(460px, calc(100vw - 32px));
+  font-size: 11px; }
+#hud .top { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+#hud .name { font-size: 13px; font-weight: 600; word-break: break-all; }
+#hud .tog { padding: 1px 6px; font-size: 10px; color: var(--muted); }
+#hud .more { display: none; margin-top: 4px; }
+#hud.open .more { display: block; }
+#hud.open .tog { color: var(--text); }
+#hud .facts { color: var(--muted); line-height: 1.5; }
+#hud .mat { color: var(--muted); margin-top: 4px; line-height: 1.5; white-space: pre-wrap; }
+#hud .clock { margin-top: 3px; font-size: 11px; color: var(--text); }
+
+/* legend */
+#legend { top: 56px; right: 16px; padding: 8px 0; width: 270px;
+  max-width: calc(100vw - 32px); max-height: calc(100vh - 220px); overflow: auto; display: none; }
+#legend .hdr { padding: 4px 12px; color: var(--muted); cursor: pointer; user-select: none;
+  letter-spacing: 0.08em; }
+#legend .hdr:hover { color: var(--text); }
+#legend .hdr.off { color: var(--faint); text-decoration: line-through; }
+#legend .row { display: flex; gap: 8px; align-items: flex-start; padding: 4px 12px; cursor: default; }
+#legend .row:hover, #legend .row.hot { background: rgba(255,255,255,0.06); }
+#legend .sw { flex: 0 0 12px; height: 12px; border-radius: 2px; margin-top: 2px; }
+#legend .sw.hollow { background: transparent !important; border: 2px solid; }
+#legend .lab { line-height: 1.35; }
+#legend .sub { color: var(--muted); font-size: 11px; }
+
+/* BC card */
+#card { left: 50%; transform: translateX(-50%); bottom: 72px; padding: 10px 14px;
+  width: 420px; max-height: calc(100vh - 300px); overflow: auto; max-width: calc(100vw - 32px); display: none; pointer-events: none; }
+#card .t { font-weight: 600; margin-bottom: 4px; }
+#card .b { color: var(--muted); margin-bottom: 6px; line-height: 1.4; }
+#card .i { color: var(--muted); margin-bottom: 6px; }
+#card table { border-collapse: collapse; width: 100%; }
+#card td { padding: 1px 6px 1px 0; vertical-align: top; }
+#card td:nth-child(2) { min-width: 9ch; overflow-wrap: anywhere; }
+#card td.n { color: var(--accent); white-space: nowrap; }
+#card td.a { color: var(--muted); }
+
+/* colour bar */
+#cbar { right: 16px; top: 50%; transform: translateY(-50%); padding: 8px 10px;
+  display: none; pointer-events: none; }
+#cbar .title { text-align: center; margin-bottom: 6px; }
+#cbar .body { display: flex; gap: 6px; }
+#cbar canvas { width: 14px; height: min(36vh, 300px); border-radius: 2px; }
+#cbar .ticks { display: flex; flex-direction: column; justify-content: space-between;
+  color: var(--muted); font-size: 11px; }
+
+/* playback */
+#controls { left: 16px; right: 16px; bottom: 14px; padding: 8px 12px; display: flex;
+  gap: 10px; align-items: center; flex-wrap: wrap; z-index: 3; }
+#controls input[type=range] { flex: 1 1 200px; accent-color: var(--accent); min-width: 120px; }
+#controls .lbl { color: var(--muted); }
+#controls input[type=number], #controls select { background: var(--btn); border: 1px solid var(--line);
+  border-radius: 4px; padding: 3px 5px; width: 74px; }
+#controls .grp { display: flex; gap: 6px; align-items: center; }
+#play { min-width: 86px; white-space: nowrap; }
+
+/* side panels (stabilization, assimilation, notes) */
+#side { position: absolute; right: 16px; bottom: 76px; display: flex; flex-direction: column;
+  gap: 5px; align-items: flex-end; max-width: calc(100vw - 32px); z-index: 2; }
+.cpanel { position: static; width: 300px; max-width: 100%; font-size: 11px; }
+.cpanel.open { width: 380px; }
+.cpanel > .head { padding: 4px 10px; cursor: pointer; user-select: none; display: flex;
+  justify-content: space-between; color: var(--muted); }
+.cpanel > .head:hover { color: var(--text); }
+.cpanel > .bodyp { display: none; padding: 0 12px 10px; max-height: 44vh; overflow: auto; }
+.cpanel.open > .bodyp { display: block; }
+.cpanel .grp { color: var(--accent); margin: 8px 0 3px; letter-spacing: 0.06em; }
+.cpanel details { padding: 2px 0; }
+.cpanel summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; gap: 10px; }
+.cpanel summary::-webkit-details-marker { display: none; }
+.cpanel summary .v { color: var(--muted); text-align: right; white-space: pre-wrap; }
+.cpanel details.inactive summary { color: var(--faint); }
+.cpanel details p { margin: 4px 0 6px; color: var(--muted); line-height: 1.45; }
+
+/* plot panels (Windkessel, parameters) */
+#plots { left: 16px; bottom: 76px; width: 520px; max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 260px); overflow: auto; padding: 8px 10px; display: none; z-index: 2; }
+#plots .ph { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+#plots .ph .t { font-weight: 600; }
+#plots .fold { padding: 1px 8px; }
+#plots.folded .plot, #plots.folded .note, #plots.folded .ph + .ph { display: none; }
+#plots .note { color: var(--muted); line-height: 1.4; margin: 4px 0 8px; }
+#plots .plot { margin-bottom: 10px; }
+#plots .plot .pt { display: flex; justify-content: space-between; gap: 8px; }
+#plots .plot .pt .s { color: var(--muted); }
+#plots svg { width: 100%; height: auto; display: block; }
+#plots svg text { font-family: var(--font); font-size: 10px; fill: var(--muted); }
+
+#loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 12px; background: var(--bg); z-index: 10; }
+#loading .bar { width: min(320px, 70vw); height: 4px; background: #222; border-radius: 2px; overflow: hidden; }
+#loading .fill { height: 100%; width: 0; background: var(--accent); transition: width 0.1s; }
+#loading .msg { color: var(--muted); }
+#loading .err { color: #e07a6a; max-width: 80vw; text-align: center; white-space: pre-wrap; }
+
+@media (max-width: 720px) {
+  #views { top: 8px; left: 8px; right: 8px; transform: none; max-width: none;
+    flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; scrollbar-width: none; }
+  #views button { flex: 0 0 auto; padding: 5px 8px; }
+  #hud { top: 46px; left: 8px; right: 8px; max-width: none; padding: 7px 10px; }
+  #hud .name { font-size: 13px; }
+  #hud .facts { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #hud .clock { margin-top: 3px; font-size: 12px; }
+  #controls { left: 8px; right: 8px; bottom: 8px; padding: 6px 8px; gap: 6px 8px; }
+  #controls input[type=range] { flex: 1 1 100%; order: -1; }
+  #controls input[type=number], #controls select { width: 58px; }
+  #play { min-width: 70px; }
+  #side { display: none; }
+  #cbar { right: 8px; top: 130px; transform: none; padding: 6px 7px; }
+  #cbar canvas { height: 22vh; }
+  #legend { left: 8px; right: 8px; width: auto; top: auto; bottom: 104px; max-height: 30vh; }
+  #legend.wk, body.carding #legend { display: none !important; }
+  #card { left: 8px !important; right: 8px; transform: none !important; width: auto; top: auto !important;
+    bottom: 104px !important; max-height: 40vh; overflow: auto; }
+  #plots { left: 8px; right: 8px; width: auto; bottom: 104px; max-height: 40vh; }
+}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="views"></div>
+<div id="hud" class="panel"></div>
+<div id="legend" class="panel"></div>
+<div id="card" class="panel"></div>
+<div id="cbar" class="panel"><div class="title"></div><div class="body"><canvas width="14" height="256"></canvas><div class="ticks"></div></div></div>
+<div id="plots" class="panel"></div>
+<div id="side"></div>
+<div id="controls" class="panel"></div>
+<div id="loading"><div class="msg">Loading FSI…</div><div class="bar"><div class="fill"></div></div><div class="msg sub"></div></div>
+<script type="module">
+import { start } from "./viewer.js?v=20261007225259";
+start("20261007225259").catch((e) => {
+  const l = document.getElementById("loading");
+  l.innerHTML = `<div class="err">Could not load this run.\n\n${e && e.message ? e.message : e}</div>`;
+  console.error(e);
+});
+</script>
+</body>
+</html>
